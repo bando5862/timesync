@@ -1,0 +1,6 @@
+C:\Program\timesync\timesync\obj\Debug\timesync.csprojResolveAssemblyReference.cache
+C:\Program\timesync\timesync\bin\Debug\timesync.exe.config
+C:\Program\timesync\timesync\bin\Debug\timesync.exe
+C:\Program\timesync\timesync\bin\Debug\timesync.pdb
+C:\Program\timesync\timesync\obj\Debug\timesync.exe
+C:\Program\timesync\timesync\obj\Debug\timesync.pdb

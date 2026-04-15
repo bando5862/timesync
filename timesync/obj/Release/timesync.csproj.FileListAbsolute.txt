@@ -1,0 +1,4 @@
+C:\Program\timesync\timesync\bin\Release\timesync.exe.config
+C:\Program\timesync\timesync\bin\Release\timesync.exe
+C:\Program\timesync\timesync\obj\Release\timesync.csprojResolveAssemblyReference.cache
+C:\Program\timesync\timesync\obj\Release\timesync.exe
