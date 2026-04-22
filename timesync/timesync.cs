@@ -105,7 +105,7 @@ namespace timesync
 			
 		}
 	    //システム日時に設定する日時を指定する
-		public static void SetNowDateTime(DateTime dt){
+		public static bool SetNowDateTime(DateTime dt){
     		SystemTime sysTime = new SystemTime();
     		sysTime.wYear = (ushort) dt.Year;
     		sysTime.wMonth = (ushort) dt.Month;
@@ -115,7 +115,7 @@ namespace timesync
     		sysTime.wSecond = (ushort) dt.Second;
     		sysTime.wMiliseconds = (ushort) dt.Millisecond;
     		//システム日時を設定する
-    		SetLocalTime(ref sysTime);
+    		return SetLocalTime(ref sysTime);
 		}
 	}
 }
