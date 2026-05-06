@@ -32,42 +32,77 @@ namespace timesync
 		[DllImport("kernel32.dll")]
 		public static extern bool SetLocalTime(ref SystemTime sysTime);
 
+		//権限設定関係
+		[System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+		private static extern IntPtr GetCurrentProcess();
+		[System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
+		private static extern bool OpenProcessToken(IntPtr ProcessHandle,uint DesiredAccess,out IntPtr TokenHandle);
+		[System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+		private static extern bool CloseHandle(IntPtr hObject);
+		[System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true,CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+		private static extern bool LookupPrivilegeValue(string lpSystemName,string lpName,out long lpLuid);
+		[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 1)]
+		private struct TOKEN_PRIVILEGES {
+			public int PrivilegeCount;
+			public long Luid;
+			public int Attributes;
+		}
+		[System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
+		private static extern int AdjustTokenPrivileges(IntPtr TokenHandle,bool DisableAllPrivileges,ref TOKEN_PRIVILEGES NewState,
+			int BufferLength,IntPtr PreviousState,IntPtr ReturnLength);
+
+		//処理モード
+		static int mode=SHOW;
+		static readonly int SHOW=0;
+		static readonly int SYNC=1;
+		static readonly int ADJUST=2;
+		static int adjustMs;
 		//uint 最大値+1
 		static readonly double MAX_UINT=4294967296.0;
 		static readonly string TIME_FORMAT="h:mm:ss.fff";
 		//時刻合わせ
 		public static int Main(string[] args)
 		{
-			DateTime t0=DateTime.Now;
-			var serverDts=Get();
-			DateTime t1=serverDts[0];
-			DateTime t2=serverDts[1];
-			DateTime t3=DateTime.Now;
-			TimeSpan reply=(t1-t0).Add(t2-t3);
-			//往復にかかった時間の半分を足す
-			var theta=new TimeSpan(reply.Ticks/2);
-			//server.Add(reply);
-			if (args.Length==0){
-				//差異表示&判定
-				Console.WriteLine(String.Format("t0: {0}",t0.ToString(TIME_FORMAT)));
-				Console.WriteLine(String.Format("t1: {0}",t1.ToString(TIME_FORMAT)));
-				Console.WriteLine(String.Format("t2: {0}",t2.ToString(TIME_FORMAT)));
-				Console.WriteLine(String.Format("t3: {0}",t3.ToString(TIME_FORMAT)));
-				Console.WriteLine(String.Format("theta: {0}",theta.TotalMilliseconds.ToString()));
-				if (Math.Abs(theta.TotalMilliseconds)<=1000.0d){
-					return 0;
-				}
-				else{
-					//1秒以上差があったら1を返す
-					return 1;
-				}
+			parseArgs(args);
+			if (mode==ADJUST){
+				AdjustToken();
+				SetNowDateTime(DateTime.Now.AddMilliseconds(adjustMs));
+				Console.WriteLine(String.Format("adjusted: {0} msec",adjustMs));
+				return 0;
 			}
 			else{
-				//時刻合わせ
-				if (args[0]=="-sync"){
-					SetNowDateTime(DateTime.Now.AddMilliseconds(theta.TotalMilliseconds));
+				DateTime t0=DateTime.Now;
+				var serverDts=Get();
+				DateTime t1=serverDts[0];
+				DateTime t2=serverDts[1];
+				DateTime t3=DateTime.Now;
+				TimeSpan reply=(t1-t0).Add(t2-t3);
+				//往復にかかった時間の半分を足す
+				var theta=new TimeSpan(reply.Ticks/2);
+				if (mode==SHOW){
+					//差異表示&判定
+					Console.WriteLine(String.Format("t0: {0}",t0.ToString(TIME_FORMAT)));
+					Console.WriteLine(String.Format("t1: {0}",t1.ToString(TIME_FORMAT)));
+					Console.WriteLine(String.Format("t2: {0}",t2.ToString(TIME_FORMAT)));
+					Console.WriteLine(String.Format("t3: {0}",t3.ToString(TIME_FORMAT)));
+					Console.WriteLine(String.Format("theta: {0}",theta.TotalMilliseconds.ToString()));
+					if (Math.Abs(theta.TotalMilliseconds)<=1000.0d){
+						return 0;
+					}
+					else{
+						//1秒以上差があったら1を返す
+						return 1;
+					}
 				}
-				return 0;
+				else{
+					//時刻合わせ
+					if (mode==SYNC){
+						AdjustToken();
+						SetNowDateTime(DateTime.Now.AddMilliseconds(theta.TotalMilliseconds));	
+						Console.WriteLine(String.Format("adjusted: {0} msec",theta.TotalMilliseconds.ToString()));
+					}
+					return 0;
+				}
 			}
 		}
 		//時刻取得（0: 受信時刻 1: 送信時刻）
@@ -115,7 +150,54 @@ namespace timesync
     		sysTime.wSecond = (ushort) dt.Second;
     		sysTime.wMiliseconds = (ushort) dt.Millisecond;
     		//システム日時を設定する
-    		return SetLocalTime(ref sysTime);
+    		var rc=SetLocalTime(ref sysTime);
+    		return rc;
 		}
+	    //引数解析
+	    private static void parseArgs(string[] args){
+	    	for (int i=0;i<args.Length;i++){
+	    		if (args[i]=="-sync"){
+	    			mode=SYNC;
+	    		}
+	    		else if (args[i]=="-adjust"){
+	    			if (i==args.Length-1){
+	    				usage();
+	    			}
+	    			mode=ADJUST;
+	    			adjustMs=int.Parse(args[i+1]);
+	    			i++;
+	    		}
+	    		else{
+	    			usage();
+	    		}
+	    	}
+	    }
+	    //Usage表示
+	    private static void usage(){
+	    	Console.Error.WriteLine("Usage : timesync [-sync] [-adjust n]");
+	    	Environment.Exit(1);
+	    }
+	    //時刻設定権限付与
+	    public static void AdjustToken() {
+			const uint TOKEN_ADJUST_PRIVILEGES = 0x20;
+			const uint TOKEN_QUERY = 0x8;
+			const int SE_PRIVILEGE_ENABLED = 0x2;
+			const string SE_SYSTEMTIME_NAME = "SeSystemtimePrivilege";
+
+			IntPtr procHandle = GetCurrentProcess();
+			//トークンを取得する
+			IntPtr tokenHandle;
+			OpenProcessToken(procHandle,TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, out tokenHandle);
+			//LUIDを取得する
+			TOKEN_PRIVILEGES tp = new TOKEN_PRIVILEGES();
+			tp.Attributes = SE_PRIVILEGE_ENABLED;
+			tp.PrivilegeCount = 1;
+			LookupPrivilegeValue(null, SE_SYSTEMTIME_NAME, out tp.Luid);
+			//特権を有効にする
+			AdjustTokenPrivileges(tokenHandle, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero);
+
+			//閉じる
+			CloseHandle(tokenHandle);
+	    }
 	}
 }
